@@ -6,8 +6,8 @@ edition = "2024"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-async-graphql = { version = "7.0.16", features = ["bson", "chrono", "uuid", "log"] }
-async-graphql-axum = "7.0.16"
+async-graphql = { version = "7.2.1", features = ["bson", "chrono", "uuid", "log"] }
+async-graphql-axum = "7.2.1"
 tokio = { version = "1.44.2", features = ["macros", "rt-multi-thread"] }
 axum = { version = "0.8.3", features = ["macros"] }
 mongodb = "2.8.2"
