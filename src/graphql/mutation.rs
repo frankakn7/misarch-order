@@ -95,7 +95,8 @@ impl Mutation {
         set_status_placed(&collection, input.id).await?;
         order = query_object(&collection, input.id).await?;
         let order_dto = OrderDTO::try_from((order.clone(), payment_authorization))?;
-        send_order_created_event(order_dto).await?;
+        let http_client = ctx.data::<reqwest::Client>()?;
+        send_order_created_event(order_dto, http_client).await?;
         Ok(order)
     }
 }
@@ -299,6 +300,7 @@ async fn create_internal_order_items<'a>(
 ) -> Result<Vec<OrderItem>> {
     let db_client = ctx.data::<Database>()?;
     let authorized_header = ctx.data::<AuthorizedUserHeader>()?;
+    let http_client = ctx.data::<reqwest::Client>()?;
     let (
         counts_by_product_variant_ids,
         order_item_inputs_by_product_variant_ids,
@@ -306,7 +308,7 @@ async fn create_internal_order_items<'a>(
         product_variant_versions_by_product_variant_ids,
         tax_rate_versions_by_product_variant_ids,
         discounts_by_product_variant_ids,
-    ) = query_or_obtain_order_item_attributes(authorized_header, input, db_client).await?;
+    ) = query_or_obtain_order_item_attributes(authorized_header, input, db_client, http_client).await?;
     let internal_order_items = zip_to_internal_order_items(
         order_item_inputs_by_product_variant_ids,
         product_variants_by_product_variant_ids,
@@ -325,6 +327,7 @@ async fn query_or_obtain_order_item_attributes(
     authorized_header: &AuthorizedUserHeader,
     input: &CreateOrderInput,
     db_client: &Database,
+    http_client: &reqwest::Client,
 ) -> Result<
     (
         HashMap<Uuid, u64>,
@@ -337,7 +340,7 @@ async fn query_or_obtain_order_item_attributes(
     Error,
 > {
     let (counts_by_product_variant_ids, order_item_inputs_by_product_variant_ids) =
-        query_counts_by_product_variant_ids(authorized_header, &input).await?;
+        query_counts_by_product_variant_ids(authorized_header, &input, http_client).await?;
     let product_variant_ids: Vec<Uuid> = counts_by_product_variant_ids.keys().cloned().collect();
     let product_variants_by_product_variant_ids: HashMap<Uuid, ProductVariant> =
         query_product_variants_by_product_variant_ids(db_client, &product_variant_ids).await?;
@@ -346,7 +349,7 @@ async fn query_or_obtain_order_item_attributes(
             &product_variants_by_product_variant_ids,
         )
         .await;
-    check_product_variant_availability(&product_variant_ids, &counts_by_product_variant_ids)
+    check_product_variant_availability(&product_variant_ids, &counts_by_product_variant_ids, http_client)
         .await?;
     let tax_rate_versions_by_product_variant_ids = query_tax_rate_versions_by_product_variant_ids(
         db_client,
@@ -359,12 +362,14 @@ async fn query_or_obtain_order_item_attributes(
         &product_variant_ids,
         &product_variant_versions_by_product_variant_ids,
         &counts_by_product_variant_ids,
+        http_client,
     )
     .await?;
     let _shipment_fees = query_shipment_fees(
         &order_item_inputs_by_product_variant_ids,
         &product_variant_versions_by_product_variant_ids,
         &counts_by_product_variant_ids,
+        http_client,
     )
     .await?;
     Ok((
@@ -449,6 +454,7 @@ struct Representation {
 async fn check_product_variant_availability(
     product_variant_ids: &Vec<Uuid>,
     counts_by_product_variant_ids: &HashMap<Uuid, u64>,
+    http_client: &reqwest::Client,
 ) -> Result<()> {
     let representations = product_variant_ids
         .iter()
@@ -461,9 +467,8 @@ async fn check_product_variant_availability(
     let variables = get_unreserved_product_item_counts::Variables { representations };
 
     let request_body = GetUnreservedProductItemCounts::build_query(variables);
-    let client = reqwest::Client::new();
 
-    let res = client
+    let res = http_client
         .post("http://localhost:3500/v1.0/invoke/inventory/method/graphql")
         .json(&request_body)
         .send()
@@ -552,6 +557,7 @@ struct GetShoppingCartProductVariantIdsAndCounts;
 async fn query_counts_by_product_variant_ids(
     authorized_user_header: &AuthorizedUserHeader,
     input: &CreateOrderInput,
+    http_client: &reqwest::Client,
 ) -> Result<(HashMap<Uuid, u64>, HashMap<Uuid, OrderItemInput>)> {
     let representations = vec![Representation {
         __typename: "User".to_string(),
@@ -560,10 +566,9 @@ async fn query_counts_by_product_variant_ids(
     let variables = get_shopping_cart_product_variant_ids_and_counts::Variables { representations };
 
     let request_body = GetShoppingCartProductVariantIdsAndCounts::build_query(variables);
-    let client = reqwest::Client::new();
 
     let authorized_user_header_string = serde_json::to_string(authorized_user_header)?;
-    let res = client
+    let res = http_client
         .post("http://localhost:3500/v1.0/invoke/shoppingcart/method/")
         .json(&request_body)
         .header("Authorized-User", authorized_user_header_string)
@@ -715,6 +720,7 @@ async fn query_discounts_by_product_variant_ids(
     product_variant_ids: &Vec<Uuid>,
     product_variant_versions_by_product_variant_ids: &HashMap<Uuid, ProductVariantVersion>,
     counts_by_product_variant_ids: &HashMap<Uuid, u64>,
+    http_client: &reqwest::Client,
 ) -> Result<HashMap<Uuid, BTreeSet<Discount>>> {
     let find_applicable_discounts_product_variant_input =
         build_find_applicable_discounts_product_variant_input(
@@ -732,9 +738,8 @@ async fn query_discounts_by_product_variant_ids(
         find_applicable_discounts_input,
     };
     let request_body = GetDiscounts::build_query(variables);
-    let client = reqwest::Client::new();
 
-    let res = client
+    let res = http_client
         .post("http://localhost:3500/v1.0/invoke/discount/method/graphql")
         .json(&request_body)
         .send()
@@ -924,6 +929,7 @@ async fn query_shipment_fees(
     order_item_inputs_by_product_variant_ids: &HashMap<Uuid, OrderItemInput>,
     product_variant_versions_by_product_variant_ids: &HashMap<Uuid, ProductVariantVersion>,
     counts_by_product_variant_ids: &HashMap<Uuid, u64>,
+    http_client: &reqwest::Client,
 ) -> Result<u64> {
     let calculate_shipment_fees_input = build_calculate_shipment_fees_input(
         product_variant_versions_by_product_variant_ids,
@@ -935,9 +941,8 @@ async fn query_shipment_fees(
     };
 
     let request_body = GetShipmentFees::build_query(variables);
-    let client = reqwest::Client::new();
 
-    let res = client
+    let res = http_client
         .post("http://localhost:3500/v1.0/invoke/shipment/method/graphql")
         .json(&request_body)
         .send()
@@ -984,9 +989,8 @@ fn build_calculate_shipment_fees_input(
 }
 
 /// Sends an `order/order/created` created event containing the order context.
-async fn send_order_created_event(order_dto: OrderDTO) -> Result<()> {
-    let client = reqwest::Client::new();
-    client
+async fn send_order_created_event(order_dto: OrderDTO, http_client: &reqwest::Client) -> Result<()> {
+    http_client
         .post("http://localhost:3500/v1.0/publish/pubsub/order/order/created")
         .json(&order_dto)
         .send()

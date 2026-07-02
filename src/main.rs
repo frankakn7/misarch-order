@@ -84,7 +84,7 @@ async fn db_connection() -> Client {
 /// Creates endpoints to define pub/sub interaction with Dapr.
 ///
 /// * `db_client` - MongoDB database client.
-async fn build_dapr_router(db_client: Database) -> Router {
+async fn build_dapr_router(db_client: Database, http_client: reqwest::Client) -> Router {
     let product_variant_collection: mongodb::Collection<ProductVariant> =
         db_client.collection::<ProductVariant>("product_variants");
     let coupon_collection: mongodb::Collection<Coupon> = db_client.collection::<Coupon>("coupons");
@@ -133,6 +133,7 @@ async fn build_dapr_router(db_client: Database) -> Router {
             user_collection,
             order_collection,
             order_compensation_collection,
+            http_client,
         });
     app
 }
@@ -260,10 +261,12 @@ fn init_tracing() {
 async fn start_service() {
     let client = db_connection().await;
     let db_client: Database = client.database("order-database");
+    let http_client = reqwest::Client::new();
 
     let schema = Schema::build(Query, Mutation, EmptySubscription)
         .extension(Logger)
         .data(db_client.clone())
+        .data(http_client.clone())
         .enable_federation()
         .finish();
 
@@ -271,7 +274,7 @@ async fn start_service() {
         .route("/", get(graphiql).post(graphql_handler))
         .route("/health", get(StatusCode::OK))
         .with_state(schema);
-    let dapr_router = build_dapr_router(db_client).await;
+    let dapr_router = build_dapr_router(db_client, http_client).await;
 
     let metrics = init_otlp();
     

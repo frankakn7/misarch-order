@@ -35,6 +35,7 @@ pub async fn compensate_order(
     order_collection: &Collection<Order>,
     order_compensation_collection: &Collection<OrderCompensation>,
     shipment_failed_event_data: ShipmentFailedEventData,
+    http_client: &reqwest::Client,
 ) -> Result<()> {
     validate_object(&order_collection, shipment_failed_event_data.order_id).await?;
     verify_items_uncompensated(
@@ -53,7 +54,7 @@ pub async fn compensate_order(
     };
     insert_order_compensation_in_mongodb(&order_compensation_collection, &order_compensation)
         .await?;
-    send_order_compensation_event(order_compensation).await
+    send_order_compensation_event(order_compensation, http_client).await
 }
 
 /// Calculates the amount that the compensation event should compensate. Based on the failed shipment event.
@@ -121,10 +122,12 @@ async fn insert_order_compensation_in_mongodb(
 /// Sends an `order/order/compensate` created event containing the amount to compensate.
 ///
 /// * `order_compensation` - Order compensation to create event with.
-async fn send_order_compensation_event(order_compensation: OrderCompensation) -> Result<()> {
-    let client = reqwest::Client::new();
+async fn send_order_compensation_event(
+    order_compensation: OrderCompensation,
+    http_client: &reqwest::Client,
+) -> Result<()> {
     let order_compensation_dto = OrderCompensationDTO::from(order_compensation);
-    client
+    http_client
         .post("http://localhost:3500/v1.0/publish/pubsub/order/order-compensation/created")
         .json(&order_compensation_dto)
         .send()

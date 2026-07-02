@@ -141,6 +141,7 @@ pub struct HttpEventServiceState {
     pub user_collection: Collection<User>,
     pub order_collection: Collection<Order>,
     pub order_compensation_collection: Collection<OrderCompensation>,
+    pub http_client: reqwest::Client,
 }
 
 /// HTTP endpoint to list topic subsciptions.
@@ -341,6 +342,7 @@ pub async fn on_shipment_creation_failed_event(
             &state.order_collection,
             &state.order_compensation_collection,
             event.data,
+            &state.http_client,
         )
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
