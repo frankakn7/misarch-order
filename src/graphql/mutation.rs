@@ -11,6 +11,7 @@ use mongodb::{
 use serde::Deserialize;
 use serde::Serialize;
 use std::any::type_name;
+use tracing::instrument;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -44,6 +45,7 @@ pub struct Mutation;
 #[Object]
 impl Mutation {
     /// Creates an order with `OrderStatus::Pending`.
+    #[instrument(skip(self, ctx, input), fields(user_id = %input.user_id))]
     async fn create_order<'a>(
         &self,
         ctx: &Context<'a>,
@@ -114,6 +116,7 @@ fn build_payment_authorization(input: &PlaceOrderInput) -> Option<PaymentAuthori
 ///
 /// * `collection` - MongoDB collection to insert order in.
 /// * `order` - Order to insert.
+#[instrument(skip(collection, order), fields(order_id = %order._id))]
 async fn insert_order_in_mongodb(collection: &Collection<Order>, order: Order) -> Result<Order> {
     match collection.insert_one(order, None).await {
         Ok(result) => {
@@ -232,6 +235,7 @@ async fn set_status_rejected_in_mongodb(collection: &Collection<Order>, id: Uuid
 }
 
 /// Checks if foreign types exist (MongoDB database populated with events).
+#[instrument(skip(db_client, input), fields(user_id = %input.user_id))]
 async fn validate_order_input(db_client: &Database, input: &CreateOrderInput) -> Result<()> {
     let user_collection: mongodb::Collection<User> = db_client.collection::<User>("users");
     validate_object(&user_collection, input.user_id).await?;
@@ -287,6 +291,7 @@ async fn validate_addresses(db_client: &Database, input: &CreateOrderInput) -> R
 ///
 /// Used before creating orders.
 /// Each order can only contain an order item with a specific product variant once.
+#[instrument(skip(ctx, input, current_timestamp), fields(user_id = %input.user_id))]
 async fn create_internal_order_items<'a>(
     ctx: &Context<'a>,
     input: &CreateOrderInput,
@@ -315,6 +320,7 @@ async fn create_internal_order_items<'a>(
 }
 
 /// Queries or obtains the attributes necessary for order item construction.
+#[instrument(skip(authorized_header, input, db_client), fields(user_id = %input.user_id))]
 async fn query_or_obtain_order_item_attributes(
     authorized_header: &AuthorizedUserHeader,
     input: &CreateOrderInput,
@@ -439,6 +445,7 @@ struct Representation {
 }
 
 /// Checks if product items are available in the inventory service.
+#[instrument(skip(product_variant_ids, counts_by_product_variant_ids), fields(product_variant_count = product_variant_ids.len()))]
 async fn check_product_variant_availability(
     product_variant_ids: &Vec<Uuid>,
     counts_by_product_variant_ids: &HashMap<Uuid, u64>,
@@ -541,6 +548,7 @@ type UUID = Uuid;
 struct GetShoppingCartProductVariantIdsAndCounts;
 
 /// Queries product variants from shopping cart item ids from shopping cart service.
+#[instrument(skip(authorized_user_header, input), fields(user_id = %input.user_id))]
 async fn query_counts_by_product_variant_ids(
     authorized_user_header: &AuthorizedUserHeader,
     input: &CreateOrderInput,
@@ -700,6 +708,7 @@ async fn query_tax_rate_versions_by_product_variant_ids(
 pub struct GetDiscounts;
 
 /// Queries discounts for coupons from discount service.
+#[instrument(skip(order_item_inputs_by_product_variant_ids, product_variant_ids, product_variant_versions_by_product_variant_ids, counts_by_product_variant_ids), fields(user_id = %user_id, product_variant_count = product_variant_ids.len()))]
 async fn query_discounts_by_product_variant_ids(
     user_id: Uuid,
     order_item_inputs_by_product_variant_ids: &HashMap<Uuid, OrderItemInput>,
@@ -910,6 +919,7 @@ fn calculate_order_amount(
 struct GetShipmentFees;
 
 /// Queries shipment fees for product variant versions and counts.
+#[instrument(skip(order_item_inputs_by_product_variant_ids, product_variant_versions_by_product_variant_ids, counts_by_product_variant_ids), fields(product_variant_count = product_variant_versions_by_product_variant_ids.len()))]
 async fn query_shipment_fees(
     order_item_inputs_by_product_variant_ids: &HashMap<Uuid, OrderItemInput>,
     product_variant_versions_by_product_variant_ids: &HashMap<Uuid, ProductVariantVersion>,

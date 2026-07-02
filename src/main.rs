@@ -19,13 +19,17 @@ use axum_otel_metrics::HttpMetricsLayerBuilder;
 use axum_otel_metrics::HttpMetricsLayer;
 
 use opentelemetry::global;
-use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider, Temporality};
+use opentelemetry_sdk::trace as sdktrace;
 use opentelemetry_sdk::Resource;
-use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider, Temporality};
+use opentelemetry_otlp::{SpanExporter, WithExportConfig};
 
-use clap::{arg, command, Parser};
+use tracing::{info, instrument};
+use tracing_opentelemetry::OpenTelemetryLayer;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry};
 
-use log::{info, Level};
+use clap::Parser;
+
 use mongodb::{options::ClientOptions, Client, Database};
 
 mod authorization;
@@ -145,7 +149,7 @@ struct Args {
 /// Activates logger and parses argument for optional schema generation. Otherwise starts gRPC and GraphQL server.
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    simple_logger::init_with_level(Level::Debug).unwrap();
+    init_tracing();
 
     let args = Args::parse();
     if args.generate_schema {
@@ -169,6 +173,7 @@ async fn main() -> std::io::Result<()> {
 /// * `schema` - GraphQL schema used by handler.
 /// * `headers` - Header map containing headers of request.
 /// * `request` - GraphQL request.
+#[instrument(skip(schema, headers, req))]
 async fn graphql_handler(
     State(schema): State<Schema<Query, Mutation, EmptySubscription>>,
     headers: HeaderMap,
@@ -213,10 +218,42 @@ fn init_otlp() -> HttpMetricsLayer {
         .build();
 
     global::set_meter_provider(provider.clone());
+    // register global provider and build metrics layer using the global provider
+    HttpMetricsLayerBuilder::new().build()
+}
 
-    HttpMetricsLayerBuilder::new()
-        .with_provider(provider.clone())
+fn init_tracing() {
+    // Do not initialize `LogTracer` here; it can conflict with setting a global tracing subscriber.
+    let otlp_url = match env::var_os("OTEL_EXPORTER_OTLP_ENDPOINT") {
+        Some(uri) => uri.into_string().unwrap(),
+        None => "http://localhost:4318".to_string(),
+    };
+
+    let otlp_endpoint = format!("{}/v1/traces", otlp_url.trim_end_matches('/'));
+
+    let span_exporter = SpanExporter::builder()
+        .with_http()
+        .with_endpoint(otlp_endpoint)
         .build()
+        .expect("Failed to create OTLP span exporter");
+
+    let tracer_provider = sdktrace::SdkTracerProvider::builder()
+        .with_simple_exporter(span_exporter)
+        .build();
+
+    global::set_tracer_provider(tracer_provider);
+
+    let tracer = global::tracer("order");
+
+    let telemetry_layer = OpenTelemetryLayer::new(tracer);
+
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+
+    Registry::default()
+        .with(env_filter)
+        .with(tracing_subscriber::fmt::layer())
+        .with(telemetry_layer)
+        .init();
 }
 
 /// Starts order service on port 8000.
