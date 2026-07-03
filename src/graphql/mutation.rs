@@ -248,6 +248,7 @@ async fn validate_order_input(db_client: &Database, input: &CreateOrderInput) ->
 /// Checks if all order item parameters are the system (MongoDB database populated with events).
 ///
 /// Used before creating orders.
+#[instrument(skip(db_client, order_item_inputs))]
 async fn validate_order_items(
     db_client: &Database,
     order_item_inputs: &BTreeSet<OrderItemInput>,
@@ -266,6 +267,7 @@ async fn validate_order_items(
 /// Checks if coupons are in the system (MongoDB database populated with events).
 ///
 /// Used before creating orders.
+#[instrument(skip(db_client, order_item_inputs))]
 async fn validate_coupons(
     db_client: &Database,
     order_item_inputs: &BTreeSet<OrderItemInput>,
@@ -282,6 +284,7 @@ async fn validate_coupons(
 /// Checks if addresses are registered under the user (MongoDB database populated with events).
 ///
 /// Used before creating orders.
+#[instrument(skip(db_client, input), fields(user_id = %input.user_id))]
 async fn validate_addresses(db_client: &Database, input: &CreateOrderInput) -> Result<()> {
     let user_collection: mongodb::Collection<User> = db_client.collection::<User>("users");
     validate_user_address(&user_collection, input.shipment_address_id, input.user_id).await?;
@@ -653,6 +656,7 @@ fn build_order_item_inputs_by_product_variant_ids(
 /// Obtains product variants from product variant UUIDs.
 ///
 /// Filters product variants which are non-publicly-visible.
+#[instrument(skip(db_client, product_variant_ids), fields(product_variant_count = product_variant_ids.len()))]
 async fn query_product_variants_by_product_variant_ids(
     db_client: &Database,
     product_variant_ids: &Vec<Uuid>,
@@ -670,6 +674,7 @@ async fn query_product_variants_by_product_variant_ids(
 }
 
 /// Obtains current product variant versions using product variants.
+#[instrument(skip(product_variants_by_product_variant_ids), fields(product_variant_count = product_variants_by_product_variant_ids.len()))]
 async fn query_product_variant_versions_by_product_variant_ids(
     product_variants_by_product_variant_ids: &HashMap<Uuid, ProductVariant>,
 ) -> HashMap<Uuid, ProductVariantVersion> {
@@ -682,6 +687,7 @@ async fn query_product_variant_versions_by_product_variant_ids(
 }
 
 /// Obtains current tax rate version for tax rate in product variant versions.
+#[instrument(skip(db_client, product_variant_versions_by_product_variant_ids), fields(product_variant_count = product_variant_versions_by_product_variant_ids.len()))]
 async fn query_tax_rate_versions_by_product_variant_ids(
     db_client: &Database,
     product_variant_versions_by_product_variant_ids: &HashMap<Uuid, ProductVariantVersion>,
@@ -989,6 +995,7 @@ fn build_calculate_shipment_fees_input(
 }
 
 /// Sends an `order/order/created` created event containing the order context.
+#[instrument(skip(order_dto))]
 async fn send_order_created_event(order_dto: OrderDTO, http_client: &reqwest::Client) -> Result<()> {
     http_client
         .post("http://localhost:3500/v1.0/publish/pubsub/order/order/created")
@@ -1001,6 +1008,7 @@ async fn send_order_created_event(order_dto: OrderDTO, http_client: &reqwest::Cl
 /// Checks if an address is registered under a specific user (MongoDB database populated with events).
 ///
 /// Used before creating orders.
+#[instrument(skip(collection), fields(user_id = %user_id, address_id = %id))]
 async fn validate_user_address(
     collection: &Collection<User>,
     id: Uuid,
@@ -1030,6 +1038,7 @@ async fn validate_user_address(
 /// Checks if a single object is in the system (MongoDB database populated with events).
 ///
 /// Used before creating orders.
+#[instrument(skip(collection), fields(id = %id))]
 pub async fn validate_object<T: for<'a> Deserialize<'a> + Unpin + Send + Sync>(
     collection: &Collection<T>,
     id: Uuid,
@@ -1040,6 +1049,7 @@ pub async fn validate_object<T: for<'a> Deserialize<'a> + Unpin + Send + Sync>(
 /// Checks if all objects are in the system (MongoDB database populated with events).
 ///
 /// Used before creating orders.
+#[instrument(skip(collection, object_ids))]
 async fn validate_objects<T: for<'b> Deserialize<'b> + Unpin + Send + Sync + PartialEq + Clone>(
     collection: &Collection<T>,
     object_ids: Vec<Uuid>,
