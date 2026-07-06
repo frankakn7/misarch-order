@@ -7,6 +7,8 @@ use futures::TryStreamExt;
 use mongodb::{bson::doc, Collection, Database};
 use serde::Deserialize;
 
+use tracing::instrument;
+
 use crate::authorization::authorize_user;
 
 use super::model::{order::Order, order_item::OrderItem, user::User};
@@ -111,6 +113,7 @@ async fn query_user_from_order_item_id(collection: &Collection<Order>, id: Uuid)
 ///
 /// * `connection` - MongoDB database connection.
 /// * `id` - UUID of object.
+#[instrument(skip(collection), fields(id = %id))]
 pub async fn query_object<T: for<'a> Deserialize<'a> + Unpin + Send + Sync>(
     collection: &Collection<T>,
     id: Uuid,
@@ -134,6 +137,7 @@ pub async fn query_object<T: for<'a> Deserialize<'a> + Unpin + Send + Sync>(
 ///
 /// * `connection` - MongoDB database connection.
 /// * `ids` - UUIDs of objects.
+#[instrument(skip(collection, object_ids), fields(count = object_ids.len()))]
 pub async fn query_objects<T: for<'a> Deserialize<'a> + Unpin + Send + Sync + Clone>(
     collection: &Collection<T>,
     object_ids: &Vec<Uuid>,

@@ -162,6 +162,7 @@ fn uuid_from_bson(bson: Bson) -> Result<Uuid> {
 ///
 /// * `collection` - MongoDB collection to update.
 /// * `id` - UUID of order to set the order status to placed.
+#[instrument(skip(collection), fields(id = %id))]
 async fn set_status_placed(collection: &Collection<Order>, id: Uuid) -> Result<()> {
     let current_timestamp_system_time = SystemTime::now();
     let order = query_object(&collection, id).await?;
@@ -325,7 +326,7 @@ async fn create_internal_order_items<'a>(
 }
 
 /// Queries or obtains the attributes necessary for order item construction.
-#[instrument(skip(authorized_header, input, db_client), fields(user_id = %input.user_id))]
+#[instrument(skip(authorized_header, input, db_client, http_client), fields(user_id = %input.user_id))]
 async fn query_or_obtain_order_item_attributes(
     authorized_header: &AuthorizedUserHeader,
     input: &CreateOrderInput,
@@ -453,7 +454,7 @@ struct Representation {
 }
 
 /// Checks if product items are available in the inventory service.
-#[instrument(skip(product_variant_ids, counts_by_product_variant_ids), fields(product_variant_count = product_variant_ids.len()))]
+#[instrument(skip(product_variant_ids, counts_by_product_variant_ids, http_client), fields(product_variant_count = product_variant_ids.len()))]
 async fn check_product_variant_availability(
     product_variant_ids: &Vec<Uuid>,
     counts_by_product_variant_ids: &HashMap<Uuid, u64>,
@@ -556,7 +557,7 @@ type UUID = Uuid;
 struct GetShoppingCartProductVariantIdsAndCounts;
 
 /// Queries product variants from shopping cart item ids from shopping cart service.
-#[instrument(skip(authorized_user_header, input), fields(user_id = %input.user_id))]
+#[instrument(skip(authorized_user_header, input, http_client), fields(user_id = %input.user_id))]
 async fn query_counts_by_product_variant_ids(
     authorized_user_header: &AuthorizedUserHeader,
     input: &CreateOrderInput,
@@ -719,7 +720,7 @@ async fn query_tax_rate_versions_by_product_variant_ids(
 pub struct GetDiscounts;
 
 /// Queries discounts for coupons from discount service.
-#[instrument(skip(order_item_inputs_by_product_variant_ids, product_variant_ids, product_variant_versions_by_product_variant_ids, counts_by_product_variant_ids), fields(user_id = %user_id, product_variant_count = product_variant_ids.len()))]
+#[instrument(skip(order_item_inputs_by_product_variant_ids, product_variant_ids, product_variant_versions_by_product_variant_ids, counts_by_product_variant_ids, http_client), fields(user_id = %user_id, product_variant_count = product_variant_ids.len()))]
 async fn query_discounts_by_product_variant_ids(
     user_id: Uuid,
     order_item_inputs_by_product_variant_ids: &HashMap<Uuid, OrderItemInput>,
@@ -930,7 +931,7 @@ fn calculate_order_amount(
 struct GetShipmentFees;
 
 /// Queries shipment fees for product variant versions and counts.
-#[instrument(skip(order_item_inputs_by_product_variant_ids, product_variant_versions_by_product_variant_ids, counts_by_product_variant_ids), fields(product_variant_count = product_variant_versions_by_product_variant_ids.len()))]
+#[instrument(skip(order_item_inputs_by_product_variant_ids, product_variant_versions_by_product_variant_ids, counts_by_product_variant_ids, http_client), fields(product_variant_count = product_variant_versions_by_product_variant_ids.len()))]
 async fn query_shipment_fees(
     order_item_inputs_by_product_variant_ids: &HashMap<Uuid, OrderItemInput>,
     product_variant_versions_by_product_variant_ids: &HashMap<Uuid, ProductVariantVersion>,
@@ -995,7 +996,7 @@ fn build_calculate_shipment_fees_input(
 }
 
 /// Sends an `order/order/created` created event containing the order context.
-#[instrument(skip(order_dto))]
+#[instrument(skip(order_dto, http_client))]
 async fn send_order_created_event(order_dto: OrderDTO, http_client: &reqwest::Client) -> Result<()> {
     http_client
         .post("http://localhost:3500/v1.0/publish/pubsub/order/order/created")

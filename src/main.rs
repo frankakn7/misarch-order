@@ -27,6 +27,7 @@ use opentelemetry_otlp::{SpanExporter, WithExportConfig};
 use tracing::{info, instrument};
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry};
+use tracing_subscriber::fmt::format::FmtSpan;
 
 use clap::Parser;
 
@@ -240,6 +241,7 @@ fn init_tracing() {
 
     let tracer_provider = sdktrace::SdkTracerProvider::builder()
         .with_simple_exporter(span_exporter)
+        .with_resource(RESOURCE.clone())
         .build();
 
     global::set_tracer_provider(tracer_provider);
@@ -252,7 +254,7 @@ fn init_tracing() {
 
     Registry::default()
         .with(env_filter)
-        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::fmt::layer().with_span_events(FmtSpan::CLOSE))
         .with(telemetry_layer)
         .init();
 }
